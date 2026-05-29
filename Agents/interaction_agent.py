@@ -8,16 +8,18 @@ from email.mime.text import MIMEText
 from typing import TypedDict, List, Dict, Any
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 import json
 import re
+
 # ==========================================================
 # 🔧 1️⃣  Load environment variables (.env)
 # ==========================================================
 load_dotenv()
 SMTP_EMAIL = os.getenv("SMTP_EMAIL")
 SMTP_PASS = os.getenv("SMTP_PASS")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # ==========================================================
 # 🧩 2️⃣  Define State Schema
@@ -30,7 +32,11 @@ class InteractionState(TypedDict):
 # ==========================================================
 # 🤖 3️⃣  Initialize LLM for Email Drafting
 # ==========================================================
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.4, api_key=os.getenv("OPENAI_API_KEY"))
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=GOOGLE_API_KEY,
+    temperature=0.4
+)
 
 email_prompt = PromptTemplate(
     input_variables=["company_name", "industry", "company_description"],
@@ -38,7 +44,7 @@ email_prompt = PromptTemplate(
         "You are an AI outreach assistant at TechNova Consulting.\n"
         "Compose a short, professional outreach email to the CEO of {company_name} "
         "(operating in {industry}). The email should:\n"
-        "- Highlight TechNova’s relevant expertise.\n"
+        "- Highlight TechNova's relevant expertise.\n"
         "- Sound conversational and human.\n"
         "- End with a call-to-action for a discovery call.\n\n"
         "Company description:\n{company_description}\n\n"
@@ -74,13 +80,10 @@ from datetime import datetime, timedelta
 def read_latest_reply(from_email: str) -> str | None:
     """Fetch latest real reply message from the given email."""
     try:
-        import imaplib, email, re
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(SMTP_EMAIL, SMTP_PASS)
-        # Search across All Mail to avoid inbox filter issues
         mail.select('"[Gmail]/All Mail"')
 
-        # Search for messages FROM that contact in last 5 days
         result, data = mail.search(None, f'(FROM "{from_email}" SINCE "05-Nov-2025")')
         if result != "OK" or not data[0]:
             return None
@@ -90,7 +93,6 @@ def read_latest_reply(from_email: str) -> str | None:
         result, msg_data = mail.fetch(latest_id, "(RFC822)")
         raw = email.message_from_bytes(msg_data[0][1])
 
-        # Extract plain text content
         body = ""
         if raw.is_multipart():
             for part in raw.walk():
@@ -99,17 +101,14 @@ def read_latest_reply(from_email: str) -> str | None:
         else:
             body = raw.get_payload(decode=True).decode(errors="ignore")
 
-        # 🧹 Clean and detect valid human reply
-        body = re.sub(r"(On .+?wrote:).*", "", body, flags=re.DOTALL)  # cut quoted message
+        body = re.sub(r"(On .+?wrote:).*", "", body, flags=re.DOTALL)
         body = body.strip().replace("\n", " ")
 
-        # Filter out system messages or automated replies
         ignore_patterns = ["Google Drive", "requests access", "out of office", "autoreply"]
         if any(p.lower() in body.lower() for p in ignore_patterns):
             print(f"⚠️ Ignored system message from {from_email}")
             return None
 
-        # Limit to a short readable snippet
         snippet = body[:250].strip()
         if snippet:
             print(f"✅ Detected reply from {from_email}: {snippet[:100]}...")
@@ -125,16 +124,11 @@ def read_latest_reply(from_email: str) -> str | None:
         except:
             pass
 
-
-
-
 # ==========================================================
 # ⏳ 6️⃣  Asynchronous Polling for Replies
 # ==========================================================
 async def wait_for_reply(from_email: str, timeout_minutes: int = 3, interval_sec: int = 10):
-    """
-    Periodically checks inbox for reply within timeout_minutes.
-    """
+    """Periodically checks inbox for reply within timeout_minutes."""
     total_wait = 0
     while total_wait < timeout_minutes * 60:
         reply = read_latest_reply(from_email)
@@ -155,7 +149,6 @@ async def interaction_agent_node(state: InteractionState) -> InteractionState:
     emails_sent, responses = [], []
 
     async def process_lead(lead):
-        """Send email and asynchronously wait for reply."""
         company_name = lead["company_name"]
         industry = lead["industry"]
         description = lead["company_description"]
@@ -173,7 +166,6 @@ async def interaction_agent_node(state: InteractionState) -> InteractionState:
             print(f"⚠️ LLM generation failed for {company_name}: {e}")
             return {"email": contact, "reply": None, "status": "failed"}
 
-        # Clean up markdown code fences (```json ... ```)
         cleaned = re.sub(r"^```(json)?|```$", "", content.strip(), flags=re.MULTILINE).strip()
 
         try:
@@ -185,27 +177,22 @@ async def interaction_agent_node(state: InteractionState) -> InteractionState:
                 "body": cleaned,
             }
 
-        # Send email via SMTP
         sent_info = send_email_smtp(contact, email_data["subject"], email_data["body"])
         emails_sent.append(sent_info)
 
-        # Start reply checking (non-blocking)
         reply_info = await wait_for_reply(contact)
         return reply_info
 
-    # ✅ Send all emails + wait concurrently
     print("🚀 Sending outreach emails asynchronously...")
     tasks = [asyncio.create_task(process_lead(lead)) for lead in shortlisted]
     results = await asyncio.gather(*tasks)
 
-    # Collect results
     for res in results:
         if res:
             responses.append(res)
 
     print("✅ Interaction completed — all outreach tasks processed.")
     return {"shortlisted": shortlisted, "emails_sent": emails_sent, "responses": responses}
-
 
 # ==========================================================
 # 🧩 8️⃣  LangGraph Setup

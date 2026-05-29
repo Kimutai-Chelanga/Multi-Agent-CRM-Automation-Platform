@@ -1,5 +1,5 @@
 from langgraph.graph import StateGraph, END
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import BaseOutputParser
 import json
@@ -27,7 +27,6 @@ class IntentScoreParser(BaseOutputParser):
         # Remove Markdown code fences if present
         text = text.strip()
         if text.startswith("```"):
-            # Remove lines like ```json and ```
             text = "\n".join([
                 line for line in text.splitlines()
                 if not line.strip().startswith("```")
@@ -39,7 +38,7 @@ class IntentScoreParser(BaseOutputParser):
                 return data
         except json.JSONDecodeError:
             pass
-        
+
         # Fallback for semi-structured output
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         results = []
@@ -65,8 +64,9 @@ def load_companies(file_path: str = "synthetic_clients.json") -> List[Dict[str, 
 # ===========================================
 # ⚙️ Step 4: Define LLM and Prompt
 # ===========================================
-llm = ChatOpenAI(
-    model="gpt-4o-mini",
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=os.getenv("GOOGLE_API_KEY"),
     temperature=0.0
 )
 
@@ -109,7 +109,7 @@ def recruitment_agent_node(state: RecruitmentState) -> RecruitmentState:
 
     # Sort and shortlist
     ranked = sorted(companies, key=lambda x: x.get("intent_score", 0), reverse=True)
-    shortlisted = ranked[:2]  # top 3 leads
+    shortlisted = ranked[:2]  # top 2 leads
 
     return {"companies": companies, "shortlisted": shortlisted}
 

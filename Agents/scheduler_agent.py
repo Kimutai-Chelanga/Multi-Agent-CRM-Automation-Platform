@@ -10,7 +10,7 @@ from typing import TypedDict, List, Dict, Any
 from dateutil import parser as dparser
 from dotenv import load_dotenv
 from langgraph.graph import StateGraph, END
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 from email.mime.text import MIMEText
 from googleapiclient.discovery import build
@@ -22,6 +22,7 @@ from google.oauth2.credentials import Credentials
 load_dotenv()
 SMTP_EMAIL = os.getenv("SMTP_EMAIL")
 SMTP_PASS = os.getenv("SMTP_PASS")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # ==========================================================
 # 📦 Scheduler State
@@ -34,7 +35,11 @@ class SchedulerState(TypedDict):
 # ==========================================================
 # 🤖 LLM for Sentiment + Intent Understanding
 # ==========================================================
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=GOOGLE_API_KEY,
+    temperature=0
+)
 
 intent_prompt = PromptTemplate(
     input_variables=["reply_text"],
@@ -62,7 +67,6 @@ def extract_meeting_datetime(reply_text: str) -> datetime | None:
     txt = reply_text.lower().strip()
     today = datetime.now()
 
-    # Common relative cases
     if "tomorrow" in txt:
         match = re.search(r"(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?", txt)
         if match:
@@ -76,11 +80,9 @@ def extract_meeting_datetime(reply_text: str) -> datetime | None:
     if "next week" in txt:
         return today + timedelta(days=7)
 
-    # Use dateutil parser for specific dates
     try:
         parsed = dparser.parse(txt, fuzzy=True, default=today)
         if parsed < today:
-            # If parsed datetime already passed, assume next occurrence
             parsed = parsed.replace(year=today.year + 1)
         return parsed
     except Exception:
@@ -162,10 +164,9 @@ def scheduler_agent_node(state: SchedulerState) -> SchedulerState:
             intent_data = {"sentiment": "neutral", "availability": None}
 
         if not intent_data.get("availability"):
-        # Simple regex check for common time phrases
             date_match = re.search(r"(?:\b(?:mon|tue|wed|thu|fri|sat|sun)\b|"
-                                r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
-                                r".{0,20}?\b\d{1,2}\b.*?(?:am|pm)?", reply_text, re.IGNORECASE)
+                                   r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)"
+                                   r".{0,20}?\b\d{1,2}\b.*?(?:am|pm)?", reply_text, re.IGNORECASE)
             if date_match:
                 intent_data["availability"] = date_match.group(0)
                 intent_data["sentiment"] = "positive"
@@ -188,7 +189,6 @@ def scheduler_agent_node(state: SchedulerState) -> SchedulerState:
                 meeting_info = create_calendar_event(email_addr, meeting_time)
                 scheduled_meetings.append(meeting_info)
             else:
-                # Ask for time options
                 subject = "Scheduling Your Discovery Call"
                 body = (
                     f"Hi,\n\nThanks for your interest in connecting with TechNova Consulting! "
@@ -224,7 +224,7 @@ if __name__ == "__main__":
     mock_responses = [
         {
             "email": "sameer19@umd.edu",
-            "reply": "Yes, I’m available next Tuesday, November 18, 2025 at 10 AM.",
+            "reply": "Yes, I'm available next Tuesday, November 18, 2025 at 10 AM.",
             "status": "replied",
         },
         {

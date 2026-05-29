@@ -5,8 +5,11 @@ import json
 import time
 import threading
 from datetime import datetime
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ------------------------------------------------------------
 # ✅ PATH FIX — Ensure Agents folder is importable
@@ -94,7 +97,7 @@ st.sidebar.markdown("---")
 
 tabs = st.sidebar.radio(
     "Navigation",
-    ["🏠 Home Dashboard", "🧩 Agents Workflow", "📈 Activity Log", "⚙️ Settings"]
+    ["🏠 Home Dashboard", "🧩 Agents Workflow", "📈 Activity Log"]
 )
 st.sidebar.markdown("---")
 st.sidebar.caption("© 2025 TechNova Consulting | AI-Powered CRM")
@@ -162,6 +165,31 @@ if tabs == "🏠 Home Dashboard":
         st.caption("Scheduler Agent books meetings via Google Calendar automatically.")
 
     st.markdown("---")
+
+    # ── Live config status read from .env ──────────────────
+    st.markdown("### ⚙️ Environment Configuration Status")
+    smtp_email   = os.getenv("SMTP_EMAIL", "")
+    smtp_pass    = os.getenv("SMTP_PASS", "")
+    google_key   = os.getenv("GOOGLE_API_KEY", "")
+    smtp_host    = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port    = os.getenv("SMTP_PORT", "465")
+    imap_host    = os.getenv("IMAP_HOST", "imap.gmail.com")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown(f"**📧 SMTP Email:** `{smtp_email if smtp_email else '❌ Not set'}`")
+        st.markdown(f"**🔒 SMTP Password:** `{'✅ Loaded' if smtp_pass else '❌ Not set'}`")
+        st.markdown(f"**🤖 Gemini API Key:** `{'✅ Loaded' if google_key else '❌ Not set'}`")
+    with col_b:
+        st.markdown(f"**📮 SMTP Host:** `{smtp_host}:{smtp_port}`")
+        st.markdown(f"**📥 IMAP Host:** `{imap_host}`")
+        st.markdown(f"**🧠 Gemini Model:** `gemini-2.5-flash`")
+
+    if not smtp_email or not smtp_pass or not google_key:
+        st.error("⚠️ One or more required environment variables are missing. Check your `.env` file.")
+    else:
+        st.success("✅ All credentials loaded successfully from `.env`")
+
     st.info("Navigate to **Agents Workflow** tab to start the full demo ➡️")
 
 # ============================================================
@@ -172,7 +200,6 @@ elif tabs == "🧩 Agents Workflow":
     st.markdown("## 🧩 Agents Workflow Simulation")
     st.caption("End-to-end AI workflow from lead discovery to analytics")
 
-    # Fake tabs for realism
     section = st.tabs(["🏠 Dashboard", "📋 Leads", "💬 Emails", "📅 Meetings", "📊 Insights"])
 
     # 1️⃣ Recruitment Agent
@@ -187,7 +214,6 @@ elif tabs == "🧩 Agents Workflow":
             st.session_state.state["shortlisted"] = output["shortlisted"]
             log_and_display(f"{len(output['shortlisted'])} leads shortlisted successfully.", "✅")
 
-            # Increase table visibility
             st.markdown("### 📊 Shortlisted Leads")
             st.dataframe(output["shortlisted"], use_container_width=True, height=600)
 
@@ -197,14 +223,20 @@ elif tabs == "🧩 Agents Workflow":
 
         if st.session_state.state["shortlisted"]:
             shortlisted = st.session_state.state["shortlisted"]
-            llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.4)
+
+            # ✅ Gemini LLM — credentials loaded from .env via load_dotenv()
+            llm = ChatGoogleGenerativeAI(
+                model="gemini-2.5-flash",
+                google_api_key=os.getenv("GOOGLE_API_KEY"),
+                temperature=0.4
+            )
 
             email_prompt = PromptTemplate(
                 input_variables=["company_name", "industry", "company_description"],
                 template=(
                     "You are an outreach assistant at TechNova Consulting.\n"
                     "Compose a professional outreach email to the CEO of {company_name} "
-                    "(in {industry}) highlighting TechNova’s expertise in AI and MLOps. "
+                    "(in {industry}) highlighting TechNova's expertise in AI and MLOps. "
                     "End with a polite discovery call invitation. Return JSON with 'subject' and 'body'.\n\n"
                     "Company description:\n{company_description}"
                 ),
@@ -221,10 +253,13 @@ elif tabs == "🧩 Agents Workflow":
                             company_description=lead["company_description"]
                         )
                     )
+                    content = response.content.strip()
+                    import re
+                    content = re.sub(r"^```(json)?|```$", "", content, flags=re.MULTILINE).strip()
                     try:
-                        data = json.loads(response.content.strip("```json").strip("```"))
-                    except:
-                        data = {"subject": "Let's Collaborate", "body": response.content}
+                        data = json.loads(content)
+                    except Exception:
+                        data = {"subject": "Let's Collaborate", "body": content}
                     lead["email_subject"] = data["subject"]
                     lead["email_body"] = data["body"]
                     drafts.append(lead)
@@ -244,6 +279,7 @@ elif tabs == "🧩 Agents Workflow":
                 if st.button("Send Approved Emails 🚀"):
                     sent = []
                     for lead in approved:
+                        # send_email_smtp reads SMTP_EMAIL / SMTP_PASS from .env internally
                         send_email_smtp(
                             lead["contact_email"], lead["email_subject"], lead["email_body"]
                         )
@@ -260,6 +296,7 @@ elif tabs == "🧩 Agents Workflow":
                 replies = []
                 for sent in st.session_state.state.get("emails_sent", []):
                     email_id = sent["contact_email"]
+                    # read_latest_reply reads SMTP_EMAIL / SMTP_PASS from .env internally
                     snippet = read_latest_reply(email_id)
                     if snippet:
                         replies.append({"email": email_id, "reply": snippet})
@@ -272,7 +309,6 @@ elif tabs == "🧩 Agents Workflow":
                 else:
                     st.info("No new replies detected yet. Try again after a few seconds.")
 
-            # 🧾 Always show stored replies
             if st.session_state.state.get("responses"):
                 st.markdown("### 💬 Customer Replies Received")
                 for r in st.session_state.state["responses"]:
@@ -288,7 +324,6 @@ elif tabs == "🧩 Agents Workflow":
                             unsafe_allow_html=True
                         )
 
-            # Optional: Auto-check every 10s
             def auto_check_replies():
                 while st.session_state.auto_checking:
                     replies = []
@@ -348,14 +383,3 @@ elif tabs == "📈 Activity Log":
     st.markdown("## 🪵 System Activity Log")
     st.text_area("Activity Timeline", "\n".join(st.session_state.logs), height=400)
     st.info("Live logs from all agents appear here in real time.")
-
-# ============================================================
-# ⚙️ SETTINGS TAB
-# ============================================================
-elif tabs == "⚙️ Settings":
-    st.markdown("## ⚙️ System Settings")
-    st.text_input("Connected Email Account", "technova.crm@gmail.com")
-    st.text_input("Google Calendar Integration", "✅ Active")
-    st.text_input("OpenAI Model", "gpt-4o-mini")
-    st.text_area("SMTP Configuration", "smtp.gmail.com:587\nusername: technova.crm@gmail.com")
-    st.success("All configurations loaded successfully.")

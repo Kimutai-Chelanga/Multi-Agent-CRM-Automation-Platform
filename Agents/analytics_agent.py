@@ -2,7 +2,7 @@ import os
 import json
 from typing import TypedDict, List, Dict, Any
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 from langgraph.graph import StateGraph, END
 
@@ -10,7 +10,7 @@ from langgraph.graph import StateGraph, END
 # 1️⃣ Setup
 # ==========================================================
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 class AnalyticsState(TypedDict):
     transcripts: List[Dict[str, Any]]
@@ -19,7 +19,11 @@ class AnalyticsState(TypedDict):
 # ==========================================================
 # 2️⃣ LLM Setup
 # ==========================================================
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.2, api_key=OPENAI_API_KEY)
+llm = ChatGoogleGenerativeAI(
+    model="gemini-2.5-flash",
+    google_api_key=GOOGLE_API_KEY,
+    temperature=0.2
+)
 
 analysis_prompt = PromptTemplate(
     input_variables=["company_name", "industry", "transcript_text"],
@@ -107,7 +111,6 @@ analytics_graph = graph.compile()
 # 5️⃣ Run Demo
 # ==========================================================
 if __name__ == "__main__":
-    # Load transcript(s)
     with open("call_transcripts.json", "r", encoding="utf-8") as f:
         transcripts = json.load(f)
 
