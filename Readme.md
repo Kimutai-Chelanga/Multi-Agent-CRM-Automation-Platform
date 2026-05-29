@@ -1,5 +1,5 @@
 # TechNova Multi‑Agent CRM System
-
+https://medium.com/@sameer.pandey617/building-a-multi-agent-crm-automation-platform-with-langgraph-streamlit-5904496f9d5f
 This project is a fully automated **stateful multi‑agent CRM platform** built using **LangGraph, LangChain, FastAPI, SMTP/IMAP, and Google Calendar API**.  
 A custom **Streamlit dashboard** provides an interactive UI for monitoring agents, approving actions, and demonstrating the workflow.
 
